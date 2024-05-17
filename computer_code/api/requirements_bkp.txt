@@ -1,0 +1,11 @@
+#pip install -r requirements.txt
+
+Flask==2.0.1
+Flask-SocketIO
+Flask-CORS
+Pillow
+pyserial
+h5py
+ruckig
+numpy
+opencv-python

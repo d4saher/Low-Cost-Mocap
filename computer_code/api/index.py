@@ -18,7 +18,9 @@ import json
 
 serialLock = threading.Lock()
 
-ser = serial.Serial("/dev/cu.usbserial-02X2K2GE", 1000000, write_timeout=1, )
+#ser = serial.Serial("/dev/cu.usbserial-02X2K2GE", 1000000, write_timeout=1, )
+
+ser = None
 
 app = Flask(__name__)
 CORS(app, supports_credentials=True)
@@ -324,4 +326,4 @@ def live_mocap(data):
 
 
 if __name__ == '__main__':
-    socketio.run(app, port=3001, debug=True)
+    socketio.run(app, host='0.0.0.0', port=3001, debug=True)

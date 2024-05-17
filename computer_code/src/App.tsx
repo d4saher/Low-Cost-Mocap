@@ -374,7 +374,7 @@ export default function App() {
             </Row>
             <Row className='mt-2 mb-1' style={{ height: "320px" }}>
               <Col>
-                <img src={cameraStreamRunning ? "http://localhost:3001/api/camera-stream" : ""} />
+                <img src={cameraStreamRunning ? "http://192.168.0.107:3001/api/camera-stream" : ""} />
               </Col>
             </Row>
           </Card>
