@@ -23,7 +23,7 @@ import ControlPanel from './views/ControlPanel';
 import SceneView from './views/SceneView';
 import { Scene } from 'three';
 
-const NUM_DRONES = 2
+const NUM_DRONES = 1
 
 export default function App() {
   enum ControlView {
@@ -43,9 +43,12 @@ export default function App() {
   const objects = useRef<Array<Array<Object>>>([])
   const [objectPointCount, setObjectPointCount] = useState(0);
 
-  const [cameraPoses, setCameraPoses] = useState<Array<object>>([{"R":[[1,0,0],[0,1,0],[0,0,1]],"t":[0,0,0]},{"R":[[-0.16346976675864877,-0.42175206694110606,0.8918535919010351],[0.4083755578879685,0.7939982753879756,0.4503289268974524],[-0.898057369590364,0.4378263727915729,0.04243852274303628]],"t":[-1.934442819517861,-0.7776297904231453,1.8553212149426448]},{"R":[[-0.995468747679551,-0.08771685482663796,0.036711384782236865],[-0.0226908879439435,0.5940481837660478,0.8041093700290873],[-0.09234227632900507,0.7996327336618874,-0.5933467748785657]],"t":[0.05316977872682252,-1.4731903376565618,3.0738369310477305]},{"R":[[0.01901733753075885,0.44381921278087044,-0.8959145312136698],[-0.6118588305706265,0.7138563836676237,0.34064326640890435],[0.7907383336641689,0.5416950893847486,0.2851303523135734]],"t":[1.5544899623116852,-0.5968091261387606,1.3600406318652503]}])
-  const [toWorldCoordsMatrix, setToWorldCoordsMatrix] = useState<number[][]>([[0.9948540418685592,-0.02410358006532853,-0.09840961744578682,0.1509028388496545],[-0.02052169721586784,0.903219950955305,-0.4286870421877468,1.5167138793041937],[-0.09921842228725493,-0.4285005689895093,-0.8980773725322871,1.654975669493927],[0,0,0,1]]
-  )
+  // const [cameraPoses, setCameraPoses] = useState<Array<object>>([{"R":[[1,0,0],[0,1,0],[0,0,1]],"t":[0,0,0]},{"R":[[-0.16346976675864877,-0.42175206694110606,0.8918535919010351],[0.4083755578879685,0.7939982753879756,0.4503289268974524],[-0.898057369590364,0.4378263727915729,0.04243852274303628]],"t":[-1.934442819517861,-0.7776297904231453,1.8553212149426448]},{"R":[[-0.995468747679551,-0.08771685482663796,0.036711384782236865],[-0.0226908879439435,0.5940481837660478,0.8041093700290873],[-0.09234227632900507,0.7996327336618874,-0.5933467748785657]],"t":[0.05316977872682252,-1.4731903376565618,3.0738369310477305]},{"R":[[0.01901733753075885,0.44381921278087044,-0.8959145312136698],[-0.6118588305706265,0.7138563836676237,0.34064326640890435],[0.7907383336641689,0.5416950893847486,0.2851303523135734]],"t":[1.5544899623116852,-0.5968091261387606,1.3600406318652503]}])
+  // const [toWorldCoordsMatrix, setToWorldCoordsMatrix] = useState<number[][]>([[0.9948540418685592,-0.02410358006532853,-0.09840961744578682,0.1509028388496545],[-0.02052169721586784,0.903219950955305,-0.4286870421877468,1.5167138793041937],[-0.09921842228725493,-0.4285005689895093,-0.8980773725322871,1.654975669493927],[0,0,0,1]])
+
+  const [cameraPoses, setCameraPoses] = useState<Array<object>>([{"R":[[1,0,0],[0,1,0],[0,0,1]],"t":[0,0,0]},{"R":[[-0.16346976675864877,-0.42175206694110606,0.8918535919010351],[0.4083755578879685,0.7939982753879756,0.4503289268974524],[-0.898057369590364,0.4378263727915729,0.04243852274303628]],"t":[-2.3139874255345165,-0.930203539026647,2.219341878905851]},{"R":[[-0.995468747679551,-0.08771685482663796,0.036711384782236865],[-0.0226908879439435,0.5940481837660478,0.8041093700290873],[-0.09234227632900507,0.7996327336618874,-0.5933467748785657]],"t":[0.06360187964769355,-1.762235555562131,3.676934740495897]},{"R":[[0.01901733753075885,0.44381921278087044,-0.8959145312136698],[-0.6118588305706265,0.7138563836676237,0.34064326640890435],[0.7907383336641689,0.5416950893847486,0.2851303523135734]],"t":[1.8594864576071548,-0.7139052131163727,1.626885472446579]}])
+  const [toWorldCoordsMatrix, setToWorldCoordsMatrix] = useState<number[][]>([[0.9948540418685592,-0.02410358006532853,-0.09840961744578682,0.12956937016820594],[-0.02052169721586784,0.903219950955305,-0.4286870421877468,1.9295887704103118],[-0.09921842228725493,-0.4285005689895093,-0.8980773725322871,2.0397640767489835],[0,0,0,1]])
+
 
   const [cameraPositions, setCameraPositions] = useState<number[][]>([]);
   const [cameraDirections, setCameraDirections] = useState<number[][]>([]);
@@ -59,6 +62,7 @@ export default function App() {
 
   const [currentControlView, setCurrentControlView] = useState<ControlView>(ControlView.CameraSettings);
 
+  
   useEffect(() => {
     socket.on("to-world-coords-matrix", (data) => {
       setToWorldCoordsMatrix(data["to_world_coords_matrix"])
@@ -165,20 +169,20 @@ export default function App() {
               </Button>
               {/* Agrega más botones según sea necesario */}
             </ButtonGroup>
-            {currentControlView === ControlView.CameraSettings && (
-              <CameraSettings
-                cameraPoses={cameraPoses}
-                setCameraPoses={setCameraPoses}
-                toWorldCoordsMatrix={toWorldCoordsMatrix}
-                setToWorldCoordsMatrix={setToWorldCoordsMatrix}
-                objectPoints={objectPoints}
-                objectPointErrors={objectPointErrors}
-                cameraStreamRunning={cameraStreamRunning}
-                isTriangulatingPoints={isTriangulatingPoints}
-                setIsTriangulatingPoints={setIsTriangulatingPoints}
-                resetPoints={resetPoints}
-              />
-            )}
+            <div style={{display: currentControlView === ControlView.CameraSettings ? 'block' : 'none' }}>
+                <CameraSettings
+                  cameraPoses={cameraPoses}
+                  setCameraPoses={setCameraPoses}
+                  toWorldCoordsMatrix={toWorldCoordsMatrix}
+                  setToWorldCoordsMatrix={setToWorldCoordsMatrix}
+                  objectPoints={objectPoints}
+                  objectPointErrors={objectPointErrors}
+                  cameraStreamRunning={cameraStreamRunning}
+                  isTriangulatingPoints={isTriangulatingPoints}
+                  setIsTriangulatingPoints={setIsTriangulatingPoints}
+                  resetPoints={resetPoints}
+                />
+              </div>
               <div style={{display: (currentControlView === ControlView.ControlDrone ||
                 currentControlView === ControlView.GenerateTrajectory) ? 'block' : 'none' }}>
                 <ControlPanel
@@ -195,6 +199,7 @@ export default function App() {
                   setDroneSetpointWithMotion={setDroneSetpointWithMotion}
                   filteredObjects={filteredObjects}
                   trajectoryPlanningSetpoints={trajectoryPlanningSetpoints}
+                  setTrajectoryPlanningSetpoints={setTrajectoryPlanningSetpoints}
                 />
               </div>
             

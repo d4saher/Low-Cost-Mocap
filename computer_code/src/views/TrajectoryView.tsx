@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Button, Card, Col, Form, Row } from 'react-bootstrap';
 
 interface TrajectoryViewProps {
+  TRAJECTORY_PLANNING_TIMESTEP: number;
   NUM_DRONES: number;
   droneArmed: boolean[];
   trajectoryPlanningMaxVel: string[];
@@ -10,6 +11,8 @@ interface TrajectoryViewProps {
   setTrajectoryPlanningMaxAccel: React.Dispatch<React.SetStateAction<string[]>>;
   trajectoryPlanningMaxJerk: string[];
   setTrajectoryPlanningMaxJerk: React.Dispatch<React.SetStateAction<string[]>>;
+  trajectoryPlanningSetpoints: number[][][];
+  setTrajectoryPlanningSetpoints: React.Dispatch<React.SetStateAction<number[][][]>>;
   trajectoryPlanningRunStartTimestamp: number;
   setTrajectoryPlanningRunStartTimestamp: React.Dispatch<React.SetStateAction<number>>;
   motionPreset: string[];
@@ -26,11 +29,12 @@ interface TrajectoryViewProps {
     maxAccel: number[],
     maxJerk: number[],
     timestep: number
-  ) => Promise<number[][]>;
+  ) => Promise<any>;
 }
 
 const TrajectoryView = (props: TrajectoryViewProps) => {
   const {
+    TRAJECTORY_PLANNING_TIMESTEP,
     NUM_DRONES,
     droneArmed,
     trajectoryPlanningMaxVel,
@@ -39,6 +43,8 @@ const TrajectoryView = (props: TrajectoryViewProps) => {
     setTrajectoryPlanningMaxAccel,
     trajectoryPlanningMaxJerk,
     setTrajectoryPlanningMaxJerk,
+    trajectoryPlanningSetpoints,
+    setTrajectoryPlanningSetpoints,
     trajectoryPlanningRunStartTimestamp,
     setTrajectoryPlanningRunStartTimestamp,
     motionPreset,

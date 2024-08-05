@@ -23,6 +23,7 @@ interface ControlPanelProps {
   setDroneSetpointWithMotion: React.Dispatch<React.SetStateAction<number[]>>,
   filteredObjects: React.MutableRefObject<object[][]>,
   trajectoryPlanningSetpoints: number[][][],
+  setTrajectoryPlanningSetpoints: React.Dispatch<React.SetStateAction<number[][][]>>,
 }
 
   const ControlPanel = (props: ControlPanelProps) => {
@@ -40,6 +41,7 @@ interface ControlPanelProps {
       setDroneSetpointWithMotion,
       filteredObjects,
       trajectoryPlanningSetpoints,
+      setTrajectoryPlanningSetpoints,
     } = props
 
     const [droneSetpoint, setDroneSetpoint] = useState(Array.apply(null, Array(NUM_DRONES)).map(() => (["0", "0", "0"])))
@@ -55,14 +57,14 @@ interface ControlPanelProps {
     useEffect(() => {
       let count = 0
       socket.emit("arm-drone", { droneArmed, count, currentDroneIndex })
-      const pingInterval = setInterval(() => {
-        count += 1
-        socket.emit("arm-drone", { droneArmed, count, currentDroneIndex })
-      }, 500)
+      // const pingInterval = setInterval(() => {
+      //   count += 1
+      //   socket.emit("arm-drone", { droneArmed, count, currentDroneIndex })
+      // }, 500)
   
-      return () => {
-        clearInterval(pingInterval)
-      }
+      // return () => {
+      //   clearInterval(pingInterval)
+      // }
     }, [droneArmed])
   
     useEffect(() => {
@@ -257,6 +259,7 @@ interface ControlPanelProps {
         </div>
         <div style={{display: (currentControlView === ControlView.GenerateTrajectory) ? 'block' : 'none' }}> 
           <TrajectoryView
+            TRAJECTORY_PLANNING_TIMESTEP={TRAJECTORY_PLANNING_TIMESTEP}
             NUM_DRONES={NUM_DRONES}
             droneArmed={droneArmed}
             trajectoryPlanningMaxVel={trajectoryPlanningMaxVel}
@@ -265,6 +268,8 @@ interface ControlPanelProps {
             setTrajectoryPlanningMaxAccel={setTrajectoryPlanningMaxAccel}
             trajectoryPlanningMaxJerk={trajectoryPlanningMaxJerk}
             setTrajectoryPlanningMaxJerk={setTrajectoryPlanningMaxJerk}
+            trajectoryPlanningSetpoints={trajectoryPlanningSetpoints}
+            setTrajectoryPlanningSetpoints={setTrajectoryPlanningSetpoints}
             trajectoryPlanningRunStartTimestamp={trajectoryPlanningRunStartTimestamp}
             setTrajectoryPlanningRunStartTimestamp={setTrajectoryPlanningRunStartTimestamp}
             motionPreset={motionPreset}

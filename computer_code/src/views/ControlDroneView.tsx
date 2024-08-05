@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { Button, Card, Col, Container, Row, Form } from 'react-bootstrap';
 import { socket } from '../shared/styles/scripts/socket';
 
+import ControlDroneRow from '../components/ControlDroneRow';
+
 const TRAJECTORY_PLANNING_TIMESTEP = 0.05;
 const LAND_Z_HEIGHT = 0.075;
 
@@ -58,126 +60,18 @@ const ControlDroneView = (props: ControlDroneViewProps) => {
                 </Col>
               </Row>
               {Array.from(Array(NUM_DRONES).keys()).map((droneIndex) => (
-                <React.Fragment key={droneIndex}>
-                  <Row className='pt-4'>
-                    <Col xs="3">
-                      <h5>Drone {droneIndex}</h5>
-                    </Col>
-                    <Col className='text-center'>
-                      X
-                    </Col>
-                    <Col className='text-center'>
-                      Y
-                    </Col>
-                    <Col className='text-center'>
-                      Z
-                    </Col>
-                  </Row>
-                  <Row>
-                    <Col xs={3} className='pt-2'>
-                      Setpoint
-                    </Col>
-                    <Col>
-                      <Form.Control
-                        value={droneSetpoint[droneIndex][0]}
-                        onChange={(event) => {
-                          let newDroneSetpoint = droneSetpoint.slice();
-                          newDroneSetpoint[droneIndex][0] = event.target.value;
-                          setDroneSetpoint(newDroneSetpoint);
-                        }}
-                      />
-                    </Col>
-                    <Col>
-                      <Form.Control
-                        value={droneSetpoint[droneIndex][1]}
-                        onChange={(event) => {
-                          let newDroneSetpoint = droneSetpoint.slice();
-                          newDroneSetpoint[droneIndex][1] = event.target.value;
-                          setDroneSetpoint(newDroneSetpoint);
-                        }}
-                      />
-                    </Col>
-                    <Col>
-                      <Form.Control
-                        value={droneSetpoint[droneIndex][2]}
-                        onChange={(event) => {
-                          let newDroneSetpoint = droneSetpoint.slice();
-                          newDroneSetpoint[droneIndex][2] = event.target.value;
-                          setDroneSetpoint(newDroneSetpoint);
-                        }}
-                      />
-                    </Col>
-                  </Row>
-                  <Row className='pt-3'>
-                    <Col>
-                      <Button
-                        size='sm'
-                        variant={droneArmed[droneIndex] ? "outline-danger" : "outline-primary"}
-                        onClick={() => {
-                          let newDroneArmed = droneArmed.slice();
-                          newDroneArmed[droneIndex] = !newDroneArmed[droneIndex];
-                          setDroneArmed(newDroneArmed);
-                        }}
-                      >
-                        {droneArmed[droneIndex] ? "Disarm" : "Arm"}
-                      </Button>
-                    </Col>
-                    <Col>
-                      <Button
-                        size='sm'
-                        onClick={() => {
-                          let newMotionPreset = motionPreset.slice();
-                          newMotionPreset[droneIndex] = "setpoint";
-                          setMotionPreset(newMotionPreset);
-                        }}
-                      >
-                        Setpoint
-                      </Button>
-                    </Col>
-                    <Col>
-                      <Button
-                        size='sm'
-                        onClick={() => {
-                          let newMotionPreset = motionPreset.slice();
-                          newMotionPreset[droneIndex] = "circle";
-                          setMotionPreset(newMotionPreset);
-                        }}
-                      >
-                        Circle
-                      </Button>
-                    </Col>
-                    <Col>
-                      <Button
-                        size='sm'
-                        onClick={() => {
-                          let newMotionPreset = motionPreset.slice();
-                          newMotionPreset[droneIndex] = "square";
-                          setMotionPreset(newMotionPreset);
-                        }}
-                      >
-                        Square
-                      </Button>
-                    </Col>
-                    <Col>
-                      <Button
-                        size='sm'
-                        onClick={async () => {
-                          await moveToPos([0, 0, LAND_Z_HEIGHT], droneIndex);
-
-                          let newDroneArmed = droneArmed.slice();
-                          newDroneArmed[droneIndex] = false;
-                          setDroneArmed(newDroneArmed);
-
-                          let newMotionPreset = motionPreset.slice();
-                          newMotionPreset[droneIndex] = "setpoint";
-                          setMotionPreset(newMotionPreset);
-                        }}
-                      >
-                        Land
-                      </Button>
-                    </Col>
-                  </Row>
-                </React.Fragment>
+                <ControlDroneRow
+                  key={droneIndex}
+                  droneIndex={droneIndex}
+                  droneSetpoint={droneSetpoint}
+                  setDroneSetpoint={setDroneSetpoint}
+                  droneArmed={droneArmed}
+                  setDroneArmed={setDroneArmed}
+                  motionPreset={motionPreset}
+                  setMotionPreset={setMotionPreset}
+                  moveToPos={moveToPos}
+                  LAND_Z_HEIGHT={LAND_Z_HEIGHT}
+                />
               ))}
               <Row className='pt-3'>
                 <Col xs={{ offset: 2 }} className='text-center'>
