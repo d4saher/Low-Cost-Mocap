@@ -12,9 +12,12 @@ from KalmanFilter import KalmanFilter
 from pseyepy import Camera
 from Singleton import Singleton
 
+from drones.drone import Drone
+
 
 @Singleton
 class Cameras:
+
     def __init__(self):
         dirname = os.path.dirname(__file__)
         filename = os.path.join(dirname, "camera-params.json")
@@ -46,9 +49,6 @@ class Cameras:
         self.ser = None
 
         self.serialLock = None
-
-        global cameras_init
-        cameras_init = True
 
     def set_socketio(self, socketio):
         self.socketio = socketio
@@ -110,18 +110,32 @@ class Cameras:
                         objects = locate_objects(object_points, errors)
                         filtered_objects = self.kalman_filter.predict_location(objects)
                         
-                        if len(filtered_objects) != 0:
-                            for filtered_object in filtered_objects:
-                                if self.drone_armed[filtered_object['droneIndex']]:
-                                    filtered_object["heading"] = round(filtered_object["heading"], 4)
+                        # if len(filtered_objects) != 0:
+                        #     for filtered_object in filtered_objects:
+                        #         if self.drone_armed[filtered_object['droneIndex']]:
+                        #             filtered_object["heading"] = round(filtered_object["heading"], 4)
 
-                                    serial_data = { 
-                                        "pos": [round(x, 4) for x in filtered_object["pos"].tolist()] + [filtered_object["heading"]],
-                                        "vel": [round(x, 4) for x in filtered_object["vel"].tolist()]
-                                    }
-                                    with self.serialLock:
-                                        self.ser.write(f"{filtered_object['droneIndex']}{json.dumps(serial_data)}".encode('utf-8'))
-                                        time.sleep(0.001)
+                        #             serial_data = { 
+                        #                 "pos": [round(x, 4) for x in filtered_object["pos"].tolist()] + [filtered_object["heading"]],
+                        #                 "vel": [round(x, 4) for x in filtered_object["vel"].tolist()]
+                        #             }
+                        #             with self.serialLock:
+                        #                 self.ser.write(f"{filtered_object['droneIndex']}{json.dumps(serial_data)}".encode('utf-8'))
+                        #                 time.sleep(0.001)
+
+                        if len(filtered_objects) != 0:
+                            drones = Drone.existing_drones()
+                            #print("Filtered Objects: ", len(filtered_objects))
+                            for filtered_object in filtered_objects:
+                                drone_index = filtered_object['droneIndex']
+                                if drone_index < len(drones):
+                                    if drones[drone_index].is_armed():
+                                        filtered_object["heading"] = round(filtered_object["heading"], 4)
+                                        position = filtered_object["pos"].tolist()
+                                        velocity = filtered_object["vel"].tolist()
+                                        heading = filtered_object["heading"]
+                                        drones[drone_index].update_position_and_velocity(position, velocity, heading)
+
                             
                         for filtered_object in filtered_objects:
                             filtered_object["vel"] = filtered_object["vel"].tolist()

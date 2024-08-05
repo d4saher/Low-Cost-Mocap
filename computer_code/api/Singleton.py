@@ -36,3 +36,7 @@ class Singleton:
 
     def __instancecheck__(self, inst):
         return isinstance(inst, self._decorated)
+    
+    #Added as the shared variable is_initialized between index and helpers was not working
+    def has_instance(self):
+        return hasattr(self, '_instance')

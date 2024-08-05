@@ -6,6 +6,7 @@ import cv2 as cv
 import numpy as np
 import json
 from scipy import linalg
+import logging
 
 from flask_socketio import SocketIO
 import copy
@@ -15,6 +16,10 @@ import threading
 from ruckig import InputParameter, OutputParameter, Result, Ruckig
 from flask_cors import CORS
 import json
+
+from drones.drone import Drone
+from drones.esp32_drone import Esp32Drone
+from drones.tello_drone import TelloDrone
 
 serialLock = threading.Lock()
 
@@ -26,11 +31,44 @@ app = Flask(__name__)
 CORS(app, supports_credentials=True)
 socketio = SocketIO(app, cors_allowed_origins='*')
 
+#Main logger configuration
+logger = logging.getLogger('werkzeug')
+handler = logging.StreamHandler()
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+handler.setFormatter(formatter)
+logger.addHandler(handler)
+logger.setLevel(logging.ERROR) # Deactivate werkzeug logs
+
 cameras_init = False
 
 num_objects = 2
 
+# drones = [
+#     #Esp32Drone(0, ser, serialLock),
+#     TelloDrone(1),
+# ]
+
+tello_drone = TelloDrone(0)
+
+def silence_logs(func):
+    def wrapper(*args, **kwargs):
+        log = logging.getLogger('werkzeug')
+        previous_level = log.level
+        log.setLevel(logging.ERROR)
+        try:
+            return func(*args, **kwargs)
+        finally:
+            log.setLevel(previous_level)
+    return wrapper
+
+@app.route("/api/drones", methods=["GET"])
+def get_drones():
+    return json.dumps({
+        "drones": [drone.to_dict() for drone in Drone.get_all_drones()]
+    })
+
 @app.route("/api/camera-stream")
+@silence_logs
 def camera_stream():
     cameras = Cameras.instance()
     cameras.set_socketio(socketio)
@@ -55,7 +93,7 @@ def camera_stream():
                 time.sleep(last_run_time - time_now + loop_interval)
             last_run_time = time.time()
             frames = cameras.get_frames()
-            jpeg_frame = cv.imencode('.jpg', frames)[1].tostring()
+            jpeg_frame = cv.imencode('.jpg', frames)[1].tobytes()
 
             yield (b'--frame\r\n'
                 b'Content-Type: image/jpeg\r\n\r\n' + jpeg_frame + b'\r\n')
@@ -115,46 +153,38 @@ def plan_trajectory(start_pos, end_pos, waypoints, max_vel, max_accel, max_jerk,
 
 @socketio.on("arm-drone")
 def arm_drone(data):
+    print("Arm drone")
+    print(data["droneArmed"])
+    print(len(Drone.existing_drones()))
     global cameras_init
-    if not cameras_init:
+    print(cameras_init)
+    if not Cameras.has_instance():
+        print("Cameras not initialized")
         return
-    
+    drones = Drone.existing_drones()
+    for droneIndex in range(0, len(drones)):
+        if data["droneArmed"][droneIndex] != drones[droneIndex].is_armed():
+            drones[droneIndex].arm(data["droneArmed"][droneIndex])
+
     Cameras.instance().drone_armed = data["droneArmed"]
-    for droneIndex in range(0, num_objects):
-        serial_data = {
-            "armed": data["droneArmed"][droneIndex],
-        }
-        with serialLock:
-            ser.write(f"{str(droneIndex)}{json.dumps(serial_data)}".encode('utf-8'))
-        
-        time.sleep(0.01)
 
 @socketio.on("set-drone-pid")
-def arm_drone(data):
-    serial_data = {
-        "pid": [float(x) for x in data["dronePID"]],
-    }
-    with serialLock:
-        ser.write(f"{str(data['droneIndex'])}{json.dumps(serial_data)}".encode('utf-8'))
-        time.sleep(0.01)
+def set_drone_pid(data):
+    print("Set drone PID")
+    drones = Drone.existing_drones()
+    drones[data['droneIndex']].set_pid(data["dronePID"])
 
 @socketio.on("set-drone-setpoint")
-def arm_drone(data):
-    serial_data = {
-        "setpoint": [float(x) for x in data["droneSetpoint"]],
-    }
-    with serialLock:
-        ser.write(f"{str(data['droneIndex'])}{json.dumps(serial_data)}".encode('utf-8'))
-        time.sleep(0.01)
+def set_drone_setpoint(data):
+    print("Set drone setpoint")
+    drones = Drone.existing_drones()
+    drones[data['droneIndex']].set_setpoint(data["droneSetpoint"])
 
 @socketio.on("set-drone-trim")
-def arm_drone(data):
-    serial_data = {
-        "trim": [int(x) for x in data["droneTrim"]],
-    }
-    with serialLock:
-        ser.write(f"{str(data['droneIndex'])}{json.dumps(serial_data)}".encode('utf-8'))
-        time.sleep(0.01)
+def set_drone_trim(data):
+    print("Set drone trim")
+    drones = Drone.existing_drones()
+    drones[data['droneIndex']].set_trim(data["droneTrim"])
 
 @socketio.on("acquire-floor")
 def acquire_floor(data):
@@ -485,4 +515,4 @@ def live_mocap(data):
 
 
 if __name__ == '__main__':
-    socketio.run(app, port=3001, debug=True)
+    socketio.run(app, port=3001, debug=False, use_reloader=False)
