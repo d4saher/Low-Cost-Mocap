@@ -55,13 +55,24 @@ class TelloDrone(Drone):
         self.current_vel = velocity
         self.current_heading = heading
 
+    def reset_pid(self):
+        # Resetear los controladores de posición
+        self.pid_x_pos.reset()
+        self.pid_y_pos.reset()
+        self.pid_z_pos.reset()
+        self.pid_yaw_pos.reset()
+        # Resetear los controladores de velocidad
+        self.pid_x_vel.reset()
+        self.pid_y_vel.reset()
+        self.pid_z_vel.reset()
+
     def update_pid(self):
-        scale_factor = 10
         # Actualizar los setpoints de velocidad con los controladores de posición
         x_vel_setpoint = self.pid_x_pos(self.current_pos[0])
         y_vel_setpoint = self.pid_y_pos(self.current_pos[1])
         z_vel_setpoint = self.pid_z_pos(self.current_pos[2])
-        yaw_setpoint = self.pid_yaw_pos(self.current_pos[3])
+        #yaw_setpoint = self.pid_yaw_pos(self.current_pos[3])
+        yaw_setpoint = 0
         
         # Actualizar los setpoints de los controladores de velocidad
         self.pid_x_vel.setpoint = x_vel_setpoint
@@ -72,17 +83,11 @@ class TelloDrone(Drone):
         x_output = self.pid_x_vel(self.current_vel[0])
         y_output = self.pid_y_vel(self.current_vel[1])
         z_output = self.pid_z_vel(self.current_vel[2])
-
-        x_output_scaled = x_output * scale_factor
-        y_output_scaled = y_output * scale_factor
-        z_output_scaled = z_output * scale_factor
-        #yaw_setpoint_scaled = yaw_setpoint * scale_factor
-        yaw_setpoint_scaled = 0
         
         # Enviar los comandos al dron
         # print("x_output: ", x_output, "y_output: ", y_output, "z_output: ", z_output, "yaw_setpoint: ", yaw_setpoint)
-        # if(self.armed):
-        #     self.tello.send_rc_control(int(x_output), int(y_output), int(z_output), int(yaw_setpoint))
+        if(self.armed):
+            self.tello.send_rc_control(int(x_output), int(y_output), int(z_output), int(yaw_setpoint))
 
         #print("x_output: ", x_output_scaled, "y_output: ", y_output_scaled, "z_output: ", z_output_scaled, "yaw_setpoint: ", yaw_setpoint_scaled)
         # if(self.armed):
@@ -107,7 +112,8 @@ class TelloDrone(Drone):
                 return
             if armed:
                 try:
-                    #self.tello.takeoff()
+                    self.reset_pid()
+                    self.tello.takeoff()
                     self.stop_control_thread.clear()
                     self.control_thread = threading.Thread(target=self.control_loop)
                     self.control_thread.start()
@@ -115,7 +121,7 @@ class TelloDrone(Drone):
                     print("Error taking off: ", e)
             else:
                 try:
-                    #self.tello.land()
+                    self.tello.land()
                     self.stop_control_thread.set()
                     if self.control_thread is not None:
                         self.control_thread.join()

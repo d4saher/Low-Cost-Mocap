@@ -2,6 +2,10 @@
 	"folders": [
 		{
 			"path": "."
+		},
+		{
+			"name": "SSH FS - ft2-3",
+			"uri": "ssh://fitlet2-3/home/testbed/tb-tracker"
 		}
 	],
 	"settings": {}
