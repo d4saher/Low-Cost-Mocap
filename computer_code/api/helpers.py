@@ -1,3 +1,5 @@
+import concurrent.futures
+import requests
 import numpy as np
 from scipy import linalg, optimize, signal
 import cv2 as cv
@@ -9,24 +11,25 @@ import time
 import numpy as np
 import cv2 as cv
 from KalmanFilter import KalmanFilter
-from pseyepy import Camera
 from Singleton import Singleton
 
 from drones.drone import Drone
-
+from CameraStream import CameraStream
 
 @Singleton
 class Cameras:
+    camera_urls = [
+        "http://192.168.0.101:5000/video_feed",
+        "http://192.168.0.152:5000/video_feed",
+        "http://192.168.0.102:5000/video_feed",
+        "http://192.168.0.134:5000/video_feed"
+    ]
 
     def __init__(self):
         dirname = os.path.dirname(__file__)
         filename = os.path.join(dirname, "camera-params.json")
         f = open(filename)
         self.camera_params = json.load(f)
-
-        self.cameras = Camera(fps=90, resolution=Camera.RES_SMALL, gain=10, exposure=100)
-        self.num_cameras = len(self.cameras.exposure)
-        print(self.num_cameras)
 
         self.is_capturing_points = False
 
@@ -50,6 +53,9 @@ class Cameras:
 
         self.serialLock = None
 
+        # Create CameraStream instances
+        self.streams = [CameraStream(url) for url in self.camera_urls]
+
     def set_socketio(self, socketio):
         self.socketio = socketio
     
@@ -68,27 +74,22 @@ class Cameras:
         self.cameras.gain = [gain] * self.num_cameras
 
     def _camera_read(self):
-        frames, _ = self.cameras.read()
 
-        for i in range(0, self.num_cameras):
-            frames[i] = np.rot90(frames[i], k=self.camera_params[i]["rotation"])
-            frames[i] = make_square(frames[i])
-            frames[i] = cv.undistort(frames[i], self.get_camera_params(i)["intrinsic_matrix"], self.get_camera_params(i)["distortion_coef"])
-            frames[i] = cv.GaussianBlur(frames[i],(9,9),0)
-            kernel = np.array([[-2,-1,-1,-1,-2],
-                               [-1,1,3,1,-1],
-                               [-1,3,4,3,-1],
-                               [-1,1,3,1,-1],
-                               [-2,-1,-1,-1,-2]])
-            frames[i] = cv.filter2D(frames[i], -1, kernel)
-            frames[i] = cv.cvtColor(frames[i], cv.COLOR_RGB2BGR)
+        start_time = time.time()
+        #Obtener los frames de las camaras
+        frames = [stream.get_frame() for stream in self.streams]
 
-        if (self.is_capturing_points):
+        #Capturing points for camera pose and live triangulation
+        if self.is_capturing_points:
+            print("Capturing Points")
             image_points = []
-            for i in range(0, self.num_cameras):
-                frames[i], single_camera_image_points = self._find_dot(frames[i])
-                image_points.append(single_camera_image_points)
-            
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future_to_image_points = {executor.submit(self._find_dot, frames[i]): i for i in range(self.num_cameras)}
+                for future in concurrent.futures.as_completed(future_to_image_points):
+                    i = future_to_image_points[future]
+                    frames[i], single_camera_image_points = future.result()
+                    image_points.append(single_camera_image_points)
+
             if (any(np.all(point[0] != [None,None]) for point in image_points)):
                 if self.is_capturing_points and not self.is_triangulating_points:
                     self.socketio.emit("image-points", [x[0] for x in image_points])
@@ -129,7 +130,7 @@ class Cameras:
                             for filtered_object in filtered_objects:
                                 drone_index = filtered_object['droneIndex']
                                 if drone_index < len(drones):
-                                    if drones[drone_index].is_armed():
+                                    #if drones[drone_index].is_armed():
                                         filtered_object["heading"] = round(filtered_object["heading"], 4)
                                         position = filtered_object["pos"].tolist()
                                         velocity = filtered_object["vel"].tolist()
@@ -147,15 +148,20 @@ class Cameras:
                         "objects": [{k:(v.tolist() if isinstance(v, np.ndarray) else v) for (k,v) in object.items()} for object in objects], 
                         "filtered_objects": filtered_objects
                     })
+
+        end_time = time.time()
+        print(f"Execution time without threads: {end_time - start_time} seconds")
         
         return frames
 
     def get_frames(self):
         frames = self._camera_read()
-        #frames = [add_white_border(frame, 5) for frame in frames]
-
-        return np.hstack(frames)
-
+        valid_frames = [frame for frame in frames if frame is not None and isinstance(frame, np.ndarray)]
+        if valid_frames:
+            return np.hstack(valid_frames)
+        else:
+            return None
+    
     def _find_dot(self, img):
         # img = cv.GaussianBlur(img,(5,5),0)
         grey = cv.cvtColor(img, cv.COLOR_RGB2GRAY)
@@ -301,7 +307,7 @@ def bundle_adjustment(image_points, camera_poses, socketio):
         init_params = np.concatenate([init_params, camera_pose["t"].flatten()])
 
     res = optimize.least_squares(
-        residual_function, init_params, verbose=2, loss="cauchy", ftol=1E-2
+        residual_function, init_params, verbose=2, loss="huber", ftol=1E-2
     )
     return params_to_camera_poses(res.x)[0]
     
@@ -552,3 +558,19 @@ def add_white_border(image, border_size):
     height, width = image.shape[:2]
     bordered_image = cv.copyMakeBorder(image, border_size, border_size, border_size, border_size, cv.BORDER_CONSTANT, value=[255, 255, 255])
     return bordered_image
+
+def fetch_frame(url):
+    response = requests.get(url, stream=True)
+    print(response)
+    if response.status_code == 200:
+        bytes_data = b''
+        for chunk in response.iter_content(chunk_size=1024):
+            bytes_data += chunk
+            a = bytes_data.find(b'\xff\xd8')
+            b = bytes_data.find(b'\xff\xd9')
+            if a != -1 and b != -1:
+                jpg = bytes_data[a:b + 2]
+                bytes_data = bytes_data[b + 2:]
+                frame = cv.imdecode(np.frombuffer(jpg, dtype=np.uint8), cv.IMREAD_COLOR)
+                return frame
+    return None
