@@ -11,8 +11,10 @@ import cv2 as cv
 from KalmanFilter import KalmanFilter
 from pseyepy import Camera
 from Singleton import Singleton
+import concurrent.futures
 
 from drones.drone import Drone
+from CameraStream import CameraStream
 
 
 @Singleton
@@ -24,9 +26,7 @@ class Cameras:
         f = open(filename)
         self.camera_params = json.load(f)
 
-        self.cameras = Camera(fps=90, resolution=Camera.RES_SMALL, gain=10, exposure=100)
-        self.num_cameras = len(self.cameras.exposure)
-        print(self.num_cameras)
+        self.num_cameras = 4
 
         self.is_capturing_points = False
 
@@ -50,6 +50,9 @@ class Cameras:
 
         self.serialLock = None
 
+        # Create CameraStream instances
+        self.streams = [CameraStream(index) for index in range (0, self.num_cameras)]
+
     def set_socketio(self, socketio):
         self.socketio = socketio
     
@@ -68,36 +71,30 @@ class Cameras:
         self.cameras.gain = [gain] * self.num_cameras
 
     def _camera_read(self):
-        frames, _ = self.cameras.read()
+        time_start = time.time()
+        # Capturar frames de todas las cámaras
+        frames = [stream.get_frame() for stream in self.streams]
 
-        for i in range(0, self.num_cameras):
-            frames[i] = np.rot90(frames[i], k=self.camera_params[i]["rotation"])
-            frames[i] = make_square(frames[i])
-            frames[i] = cv.undistort(frames[i], self.get_camera_params(i)["intrinsic_matrix"], self.get_camera_params(i)["distortion_coef"])
-            frames[i] = cv.GaussianBlur(frames[i],(9,9),0)
-            kernel = np.array([[-2,-1,-1,-1,-2],
-                               [-1,1,3,1,-1],
-                               [-1,3,4,3,-1],
-                               [-1,1,3,1,-1],
-                               [-2,-1,-1,-1,-2]])
-            frames[i] = cv.filter2D(frames[i], -1, kernel)
-            frames[i] = cv.cvtColor(frames[i], cv.COLOR_RGB2BGR)
+        # Procesar frames en paralelo y preservar el orden
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            processed_frames = list(executor.map(self.process_frame_with_index, frames, range(self.num_cameras)))
 
-        if (self.is_capturing_points):
+        # Procesar puntos de imagen si está habilitado
+        if self.is_capturing_points:
             image_points = []
-            for i in range(0, self.num_cameras):
-                frames[i], single_camera_image_points = self._find_dot(frames[i])
+            for i in range(self.num_cameras):
+                processed_frames[i], single_camera_image_points = self._find_dot(processed_frames[i])
                 image_points.append(single_camera_image_points)
-            
-            if (any(np.all(point[0] != [None,None]) for point in image_points)):
+
+            if any(np.all(point[0] != [None, None]) for point in image_points):
                 if self.is_capturing_points and not self.is_triangulating_points:
                     self.socketio.emit("image-points", [x[0] for x in image_points])
                 elif self.is_triangulating_points:
                     errors, object_points, frames = find_point_correspondance_and_object_points(image_points, self.camera_poses, frames)
 
-                    # convert to world coordinates
+                    # Convertir a coordenadas del mundo
                     for i, object_point in enumerate(object_points):
-                        new_object_point = np.array([[-1,0,0],[0,-1,0],[0,0,1]]) @ object_point
+                        new_object_point = np.array([[-1, 0, 0], [0, -1, 0], [0, 0, 1]]) @ object_point
                         new_object_point = np.concatenate((new_object_point, [1]))
                         new_object_point = np.array(self.to_world_coords_matrix) @ new_object_point
                         new_object_point = new_object_point[:3] / new_object_point[3]
@@ -109,53 +106,54 @@ class Cameras:
                     if self.is_locating_objects:
                         objects = locate_objects(object_points, errors)
                         filtered_objects = self.kalman_filter.predict_location(objects)
-                        
-                        # if len(filtered_objects) != 0:
-                        #     for filtered_object in filtered_objects:
-                        #         if self.drone_armed[filtered_object['droneIndex']]:
-                        #             filtered_object["heading"] = round(filtered_object["heading"], 4)
-
-                        #             serial_data = { 
-                        #                 "pos": [round(x, 4) for x in filtered_object["pos"].tolist()] + [filtered_object["heading"]],
-                        #                 "vel": [round(x, 4) for x in filtered_object["vel"].tolist()]
-                        #             }
-                        #             with self.serialLock:
-                        #                 self.ser.write(f"{filtered_object['droneIndex']}{json.dumps(serial_data)}".encode('utf-8'))
-                        #                 time.sleep(0.001)
 
                         if len(filtered_objects) != 0:
                             drones = Drone.existing_drones()
-                            #print("Filtered Objects: ", len(filtered_objects))
                             for filtered_object in filtered_objects:
                                 drone_index = filtered_object['droneIndex']
-                                if drone_index < len(drones):
-                                    if drones[drone_index].is_armed():
-                                        filtered_object["heading"] = round(filtered_object["heading"], 4)
-                                        position = filtered_object["pos"].tolist()
-                                        velocity = filtered_object["vel"].tolist()
-                                        heading = filtered_object["heading"]
-                                        drones[drone_index].update_position_and_velocity(position, velocity, heading)
-
-                            
+                                if drone_index < len(drones) and drones[drone_index].is_armed():
+                                    filtered_object["heading"] = round(filtered_object["heading"], 4)
+                                    position = filtered_object["pos"].tolist()
+                                    velocity = filtered_object["vel"].tolist()
+                                    heading = filtered_object["heading"]
+                                    drones[drone_index].update_position_and_velocity(position, velocity, heading)
+                        
                         for filtered_object in filtered_objects:
                             filtered_object["vel"] = filtered_object["vel"].tolist()
                             filtered_object["pos"] = filtered_object["pos"].tolist()
                     
                     self.socketio.emit("object-points", {
-                        "object_points": object_points.tolist(), 
-                        "errors": errors.tolist(), 
-                        "objects": [{k:(v.tolist() if isinstance(v, np.ndarray) else v) for (k,v) in object.items()} for object in objects], 
+                        "object_points": object_points.tolist(),
+                        "errors": errors.tolist(),
+                        "objects": [{k: (v.tolist() if isinstance(v, np.ndarray) else v) for (k, v) in object.items()} for object in objects],
                         "filtered_objects": filtered_objects
                     })
-        
-        return frames
+
+        time_end = time.time()
+        print("Time to process frame: ", time_end - time_start)
+
+        return processed_frames
 
     def get_frames(self):
         frames = self._camera_read()
         #frames = [add_white_border(frame, 5) for frame in frames]
 
         return np.hstack(frames)
-
+    
+    def process_frame(self, frame, i):
+            frame = np.rot90(frame, k=self.camera_params[i]["rotation"])
+            frame = make_square(frame)
+            frame = cv.undistort(frame, self.get_camera_params(i)["intrinsic_matrix"], self.get_camera_params(i)["distortion_coef"])
+            frame = cv.GaussianBlur(frame,(9,9),0)
+            kernel = np.array([[-2,-1,-1,-1,-2],
+                               [-1,1,3,1,-1],
+                               [-1,3,4,3,-1],
+                               [-1,1,3,1,-1],
+                               [-2,-1,-1,-1,-2]])
+            frame = cv.filter2D(frame, -1, kernel)
+            frame = cv.cvtColor(frame, cv.COLOR_RGB2BGR)
+            return frame
+    
     def _find_dot(self, img):
         # img = cv.GaussianBlur(img,(5,5),0)
         grey = cv.cvtColor(img, cv.COLOR_RGB2GRAY)
