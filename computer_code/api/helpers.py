@@ -12,6 +12,7 @@ from KalmanFilter import KalmanFilter
 from pseyepy import Camera
 from Singleton import Singleton
 
+from CameraCapture import CameraCapture
 
 @Singleton
 class Cameras:
@@ -21,9 +22,9 @@ class Cameras:
         f = open(filename)
         self.camera_params = json.load(f)
 
-        self.cameras = Camera(fps=90, resolution=Camera.RES_SMALL, gain=10, exposure=100)
-        self.num_cameras = len(self.cameras.exposure)
-        print(self.num_cameras)
+        self.camera_indices = find_cameras()
+        self.num_cameras = len(self.camera_indices)
+        print("Cameras found: ", self.num_cameras)
 
         self.is_capturing_points = False
 
@@ -48,6 +49,15 @@ class Cameras:
         global cameras_init
         cameras_init = True
 
+        print(f"Cameras: {self.camera_indices}")
+        self.cameras = [CameraCapture(i) for i in self.camera_indices]
+
+        # Iniciar cada captura en un hilo
+        for camera in self.cameras:
+            camera.start()
+
+        time.sleep(0.1)
+
     def set_socketio(self, socketio):
         self.socketio = socketio
     
@@ -66,20 +76,32 @@ class Cameras:
         self.cameras.gain = [gain] * self.num_cameras
 
     def _camera_read(self):
-        frames, _ = self.cameras.read()
+        frames = [None] * self.num_cameras
 
-        for i in range(0, self.num_cameras):
-            frames[i] = np.rot90(frames[i], k=self.camera_params[i]["rotation"])
-            frames[i] = make_square(frames[i])
-            frames[i] = cv.undistort(frames[i], self.get_camera_params(i)["intrinsic_matrix"], self.get_camera_params(i)["distortion_coef"])
-            frames[i] = cv.GaussianBlur(frames[i],(9,9),0)
-            kernel = np.array([[-2,-1,-1,-1,-2],
-                               [-1,1,3,1,-1],
-                               [-1,3,4,3,-1],
-                               [-1,1,3,1,-1],
-                               [-2,-1,-1,-1,-2]])
-            frames[i] = cv.filter2D(frames[i], -1, kernel)
-            frames[i] = cv.cvtColor(frames[i], cv.COLOR_RGB2BGR)
+        for idx, camera in enumerate(self.cameras):
+            print(f"Camera {idx}")
+            ret, frame = camera.get_frame()
+            if ret:
+                print("Frame read")
+                frames[idx] = frame 
+                
+        if any(frame is None for frame in frames):
+            return frames
+        
+        for idx in range(0, self.num_cameras):
+            frames[idx] = np.rot90(frames[idx], k=self.camera_params[idx]["rotation"])
+            frames[idx] = make_square(frames[idx])
+            frames[idx] = cv.undistort(frames[idx], self.get_camera_params(idx)["intrinsic_matrix"], self.get_camera_params(idx)["distortion_coef"])
+            frames[idx] = cv.GaussianBlur(frames[idx], (9, 9), 0)
+            
+            kernel = np.array([[-2, -1, -1, -1, -2],
+                            [-1, 1, 3, 1, -1],
+                            [-1, 3, 4, 3, -1],
+                            [-1, 1, 3, 1, -1],
+                            [-2, -1, -1, -1, -2]])
+            
+            frames[idx] = cv.filter2D(frames[idx], -1, kernel)
+            frames[idx] = cv.cvtColor(frames[idx], cv.COLOR_RGB2BGR)
 
         if (self.is_capturing_points):
             image_points = []
@@ -199,6 +221,14 @@ class Cameras:
         if distortion_coef is not None:
             self.camera_params[camera_num]["distortion_coef"] = distortion_coef
 
+def find_cameras():
+    arr = []
+    for index in range(0, 10):
+        cap = cv.VideoCapture(index)
+        if cap.read()[0]:
+            arr.append(index)
+        cap.release()
+    return arr
 
 def calculate_reprojection_errors(image_points, object_points, camera_poses):
     errors = np.array([])

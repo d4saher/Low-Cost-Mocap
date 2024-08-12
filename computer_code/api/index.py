@@ -18,7 +18,9 @@ import json
 
 serialLock = threading.Lock()
 
-ser = serial.Serial("/dev/cu.usbserial-02X2K2GE", 1000000, write_timeout=1, )
+#ser = serial.Serial("/dev/cu.usbserial-02X2K2GE", 1000000, write_timeout=1, )
+
+ser = None
 
 app = Flask(__name__)
 CORS(app, supports_credentials=True)
@@ -45,6 +47,7 @@ def camera_stream():
         while True:
             time_now = time.time()
 
+            print("Reading frame")
             i = (i+1)%10
             if i == 0:
                 socketio.emit("fps", {"fps": round(1/(time_now - last_run_time))})
@@ -53,7 +56,10 @@ def camera_stream():
                 time.sleep(last_run_time - time_now + loop_interval)
             last_run_time = time.time()
             frames = cameras.get_frames()
-            jpeg_frame = cv.imencode('.jpg', frames)[1].tostring()
+            if any([frame is None for frame in frames]):
+                continue
+            else:
+                jpeg_frame = cv.imencode('.jpg', frames)[1].tostring()
 
             yield (b'--frame\r\n'
                 b'Content-Type: image/jpeg\r\n\r\n' + jpeg_frame + b'\r\n')
