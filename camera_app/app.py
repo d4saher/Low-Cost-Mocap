@@ -60,4 +60,3 @@ if __name__ == "__main__":
             cv.imshow("Camera", frame)
             if cv.waitKey(1) & 0xFF == ord('q'):
                 break
-

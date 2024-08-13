@@ -3,6 +3,10 @@ import numpy as np
 import os
 import json
 import time
+
+from Singleton import Singleton
+
+@Singleton
 class Camera:
     def __init__(self):
         """
@@ -31,6 +35,7 @@ class Camera:
 
     def _camera_read(self):
         ret, frame = self.cap.read()
+        processed_frame = None
         if ret:
             processed_frame = self.process_frame(frame)
         return processed_frame, time.time()
