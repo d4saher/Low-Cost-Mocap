@@ -1,25 +1,63 @@
-from flask import Flask, render_template, Response
+import numpy as np
+import cv2 as cv
+import time
+import paho.mqtt.client as mqtt
+import json
+import os
+
 from camera import Camera
-import cv2
 
-app = Flask(__name__)
+CAMERA_ID = "cam_1"
 
-@app.route('/')
-def index():
-    return render_template('index.html')
+camera = Camera()
 
-@app.route('/video_feed')
-def video_feed():
-    camera = Camera.instance()
-    def gen(camera):
-        while True:
-            frame = camera.get_frame()
-            jpeg_frame = cv2.imencode('.jpg', frame)[1].tobytes()
-            yield (b'--frame\r\n'
-                   b'Content-Type: image/jpeg\r\n\r\n' + jpeg_frame + b'\r\n\r\n')
+is_capturing_points = False
 
-    return Response(gen(camera),
-                    mimetype='multipart/x-mixed-replace; boundary=frame')
+client = mqtt.Client()
 
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', debug=True)
+dev = True
+
+def on_connect(client, userdata, flags, rc):
+    print(f"Connected with result code {rc}")
+
+    client.subscribe("tb-tracker/is_capturing_points")
+
+def on_message(client, userdata, msg):
+    global is_capturing_points
+    if msg.topic == "tb-tracker/is_capturing_points" and json.loads(msg.payload.decode()) != is_capturing_points:
+        is_capturing_points = json.loads(msg.payload.decode())
+        camera.set_is_capturing_points(is_capturing_points)
+
+def send_points(points, timestamp):
+    
+    if points == [[None, None]]:
+        points = []
+
+    print(f"Sending points: {points}")
+    topic = f"tb-tracker/{CAMERA_ID}/points"
+    payload = {
+        "timestamp": timestamp,
+        "points": points
+    }
+
+    client.publish(topic, json.dumps(payload))
+
+if __name__ == "__main__":
+
+    client.on_connect = on_connect
+    client.on_message = on_message
+
+    client.connect("localhost", 1883, 60)
+
+    client.loop_start()
+    while True:
+        frame, image_points, timestamp = camera.get_frame()
+        print(image_points)
+        
+        send_points(image_points, timestamp)
+
+        if dev:
+            cv.imshow("Camera", frame)
+            if cv.waitKey(1) & 0xFF == ord('q'):
+                break
+
