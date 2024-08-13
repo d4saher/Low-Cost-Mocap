@@ -7,6 +7,7 @@ import numpy as np
 import json
 from scipy import linalg
 import logging
+import paho.mqtt.client as mqtt
 
 from flask_socketio import SocketIO
 import copy
@@ -22,6 +23,8 @@ from drones.esp32_drone import Esp32Drone
 from drones.tello_drone import TelloDrone
 
 serialLock = threading.Lock()
+
+mqtt_client = mqtt.Client()
 
 #ser = serial.Serial("/dev/cu.usbserial-02X2K2GE", 1000000, write_timeout=1, )
 
@@ -92,6 +95,8 @@ def camera_stream():
             if time_now - last_run_time < loop_interval:
                 time.sleep(last_run_time - time_now + loop_interval)
             last_run_time = time.time()
+            while cameras.get_frame_is_ready() == False:
+                pass
             frames = cameras.get_frames()
             jpeg_frame = cv.imencode('.jpg', frames)[1].tobytes()
 
@@ -513,6 +518,6 @@ def live_mocap(data):
     elif (start_or_stop == "stop"):
         cameras.stop_trangulating_points()
 
-
 if __name__ == '__main__':
+
     socketio.run(app, port=3001, debug=False, use_reloader=False)

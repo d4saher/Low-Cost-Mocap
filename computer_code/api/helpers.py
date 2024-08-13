@@ -10,6 +10,7 @@ import os
 import time
 import numpy as np
 import cv2 as cv
+import paho.mqtt.client as mqtt
 from KalmanFilter import KalmanFilter
 from Singleton import Singleton
 
@@ -18,12 +19,6 @@ from CameraStream import CameraStream
 
 @Singleton
 class Cameras:
-    camera_urls = [
-        "http://192.168.0.101:5000/video_feed",
-        "http://192.168.0.152:5000/video_feed",
-        "http://192.168.0.102:5000/video_feed",
-        "http://192.168.0.134:5000/video_feed"
-    ]
 
     def __init__(self):
         dirname = os.path.dirname(__file__)
@@ -53,8 +48,17 @@ class Cameras:
 
         self.serialLock = None
 
-        # Create CameraStream instances
-        self.streams = [CameraStream(url) for url in self.camera_urls]
+        #MQTT client configuration
+        self.mqtt_client = mqtt.Client()
+        self.mqtt_client.on_connect = self.on_connect
+        self.mqtt_client.on_message = self.on_message
+        self.mqtt_client.connect("localhost", 1883, 60)
+        self.mqtt_client.loop_start()
+
+        self.image_points = [None, None, None, None]
+        self.frame_ready = False
+        self.processing_interval = 0.1
+        self.last_processing_time = time.time()
 
     def set_socketio(self, socketio):
         self.socketio = socketio
@@ -68,6 +72,9 @@ class Cameras:
     def set_num_objects(self, num_objects):
         self.num_objects = num_objects
         self.drone_armed = [False for i in range(0, self.num_objects)]
+
+    def get_frame_is_ready(self):
+        return self.frame_ready
     
     def edit_settings(self, exposure, gain):
         self.cameras.exposure = [exposure] * self.num_cameras
@@ -76,25 +83,23 @@ class Cameras:
     def _camera_read(self):
 
         start_time = time.time()
-        #Obtener los frames de las camaras
-        frames = [stream.get_frame() for stream in self.streams]
+        frames = []
 
+        #print(self.image_points)
+        for i, data in enumerate(self.image_points):
+            #if data and data['points']:
+                #print(f"Camara {i+1}: {data['points']} at {data['timestamp']}")
+            frames.append(self.generate_frame_with_points(i, data))
+                        
         #Capturing points for camera pose and live triangulation
         if self.is_capturing_points:
-            print("Capturing Points")
-            image_points = []
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                future_to_image_points = {executor.submit(self._find_dot, frames[i]): i for i in range(self.num_cameras)}
-                for future in concurrent.futures.as_completed(future_to_image_points):
-                    i = future_to_image_points[future]
-                    frames[i], single_camera_image_points = future.result()
-                    image_points.append(single_camera_image_points)
-
-            if (any(np.all(point[0] != [None,None]) for point in image_points)):
+            if any(data is not None and 'points' in data and np.all(data['points'] != []) for data in self.image_points):
                 if self.is_capturing_points and not self.is_triangulating_points:
-                    self.socketio.emit("image-points", [x[0] for x in image_points])
+                    self.socketio.emit("image-points", [x['points'] for x in self.image_points if x and 'points' in x])
+
+
                 elif self.is_triangulating_points:
-                    errors, object_points, frames = find_point_correspondance_and_object_points(image_points, self.camera_poses, frames)
+                    errors, object_points, frames = find_point_correspondance_and_object_points(self.image_points, self.camera_poses, frames)
 
                     # convert to world coordinates
                     for i, object_point in enumerate(object_points):
@@ -110,20 +115,7 @@ class Cameras:
                     if self.is_locating_objects:
                         objects = locate_objects(object_points, errors)
                         filtered_objects = self.kalman_filter.predict_location(objects)
-                        
-                        # if len(filtered_objects) != 0:
-                        #     for filtered_object in filtered_objects:
-                        #         if self.drone_armed[filtered_object['droneIndex']]:
-                        #             filtered_object["heading"] = round(filtered_object["heading"], 4)
-
-                        #             serial_data = { 
-                        #                 "pos": [round(x, 4) for x in filtered_object["pos"].tolist()] + [filtered_object["heading"]],
-                        #                 "vel": [round(x, 4) for x in filtered_object["vel"].tolist()]
-                        #             }
-                        #             with self.serialLock:
-                        #                 self.ser.write(f"{filtered_object['droneIndex']}{json.dumps(serial_data)}".encode('utf-8'))
-                        #                 time.sleep(0.001)
-
+                    
                         if len(filtered_objects) != 0:
                             drones = Drone.existing_drones()
                             #print("Filtered Objects: ", len(filtered_objects))
@@ -149,8 +141,11 @@ class Cameras:
                         "filtered_objects": filtered_objects
                     })
 
+        self.image_points = [None, None, None, None]
+        self.frame_ready = False
+
         end_time = time.time()
-        print(f"Execution time without threads: {end_time - start_time} seconds")
+        #print(f"Execution time without threads: {end_time - start_time} seconds")
         
         return frames
 
@@ -162,33 +157,14 @@ class Cameras:
         else:
             return None
     
-    def _find_dot(self, img):
-        # img = cv.GaussianBlur(img,(5,5),0)
-        grey = cv.cvtColor(img, cv.COLOR_RGB2GRAY)
-        grey = cv.threshold(grey, 255*0.2, 255, cv.THRESH_BINARY)[1]
-        contours,_ = cv.findContours(grey, cv.RETR_TREE, cv.CHAIN_APPROX_SIMPLE)
-        img = cv.drawContours(img, contours, -1, (0,255,0), 1)
-
-        image_points = []
-        for contour in contours:
-            moments = cv.moments(contour)
-            if moments["m00"] != 0:
-                center_x = int(moments["m10"] / moments["m00"])
-                center_y = int(moments["m01"] / moments["m00"])
-                cv.putText(img, f'({center_x}, {center_y})', (center_x,center_y - 15), cv.FONT_HERSHEY_SIMPLEX, 0.3, (100,255,100), 1)
-                cv.circle(img, (center_x,center_y), 1, (100,255,100), -1)
-                image_points.append([center_x, center_y])
-
-        if len(image_points) == 0:
-            image_points = [[None, None]]
-
-        return img, image_points
 
     def start_capturing_points(self):
         self.is_capturing_points = True
+        self.mqtt_client.publish("tb-tracker/is_capturing_points", "true")
 
     def stop_capturing_points(self):
         self.is_capturing_points = False
+        self.mqtt_client.publish("tb-tracker/is_capturing_points", "false")
 
     def start_trangulating_points(self, camera_poses):
         self.is_capturing_points = True
@@ -221,6 +197,78 @@ class Cameras:
         if distortion_coef is not None:
             self.camera_params[camera_num]["distortion_coef"] = distortion_coef
 
+    def on_connect(self, client, userdata, flags, rc):
+        print(f"Connected with result code {rc}")
+
+        client.subscribe("tb-tracker/cam_1/points")
+        client.subscribe("tb-tracker/cam_2/points")
+        client.subscribe("tb-tracker/cam_3/points")
+        client.subscribe("tb-tracker/cam_4/points")
+
+    def on_message(self, client, userdata, msg):
+        # Identificar de qué cámara provienen los puntos
+        camera_id = None
+        if msg.topic == "tb-tracker/cam_1/points":
+            camera_id = 0
+        elif msg.topic == "tb-tracker/cam_2/points":
+            camera_id = 1
+        elif msg.topic == "tb-tracker/cam_3/points":
+            camera_id = 2
+        elif msg.topic == "tb-tracker/cam_4/points":
+            camera_id = 3
+
+        if camera_id is not None:
+            # Decodificar el mensaje y extraer los puntos
+            data = json.loads(msg.payload.decode())
+            points = data.get("points", [])
+            timestamp = data.get("timestamp", None)
+
+            # Almacenar los puntos en la posición correspondiente del array
+            self.image_points[camera_id] = {
+                'points': points,
+                'timestamp': timestamp
+            }
+
+            self.frame_ready = True
+
+            print(f"Received points from cam_{camera_id + 1}: {points}")
+        
+
+    def generate_frame_with_points(self, camera_index, data):
+        # Tamaño cuadrado original (640x640 píxeles)
+        square_size = 640
+        
+        # Tamaño deseado (320x240 píxeles)
+        output_width = 320
+        output_height = 240
+
+        # Crear una imagen negra de 320x240 píxeles
+        frame = np.zeros((output_height, output_width, 3), dtype=np.uint8)
+
+        if data and data['points']:
+            # Calcular el padding aplicado a la imagen cuadrada original (ay será 80 en este caso)
+            ax = (square_size - 640) // 2  # En este caso, ax será 0
+            ay = (square_size - 480) // 2  # En este caso, ay será 80
+
+            # Calcular factores de escala para convertir de 640x640 a 320x240
+            scale_x = output_width / square_size
+            scale_y = output_height / square_size
+
+            # Dibujar los puntos en la imagen escalada
+            if data["points"] != []:
+                for point in data["points"]:
+                    if len(point) == 2:
+                        # Ajustar las coordenadas del punto según el padding y escalar a la nueva resolución
+                        x = int((point[0] + ax) * scale_x)
+                        y = int((point[1] + ay) * scale_y)
+                        
+                        # Verificar que las coordenadas están dentro de los límites de la imagen de salida
+                        if 0 <= x < output_width and 0 <= y < output_height:
+                            cv.circle(frame, (x, y), 2, (0, 255, 0), -1)  # Puntos verdes
+                        else:
+                            print(f"Point {point} out of bounds after scaling for camera {camera_index + 1}")
+
+        return frame
 
 def calculate_reprojection_errors(image_points, object_points, camera_poses):
     errors = np.array([])
@@ -558,19 +606,3 @@ def add_white_border(image, border_size):
     height, width = image.shape[:2]
     bordered_image = cv.copyMakeBorder(image, border_size, border_size, border_size, border_size, cv.BORDER_CONSTANT, value=[255, 255, 255])
     return bordered_image
-
-def fetch_frame(url):
-    response = requests.get(url, stream=True)
-    print(response)
-    if response.status_code == 200:
-        bytes_data = b''
-        for chunk in response.iter_content(chunk_size=1024):
-            bytes_data += chunk
-            a = bytes_data.find(b'\xff\xd8')
-            b = bytes_data.find(b'\xff\xd9')
-            if a != -1 and b != -1:
-                jpg = bytes_data[a:b + 2]
-                bytes_data = bytes_data[b + 2:]
-                frame = cv.imdecode(np.frombuffer(jpg, dtype=np.uint8), cv.IMREAD_COLOR)
-                return frame
-    return None
