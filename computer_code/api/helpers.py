@@ -55,7 +55,8 @@ class Cameras:
         self.mqtt_client.connect("localhost", 1883, 60)
         self.mqtt_client.loop_start()
 
-        self.image_points = [None, None, None, None]
+        self.num_cameras = 4
+        self.image_points = [None] * self.num_cameras
         self.frame_ready = False
         self.processing_interval = 0.1
         self.last_processing_time = time.time()
@@ -85,7 +86,6 @@ class Cameras:
         start_time = time.time()
         frames = []
 
-        #print(self.image_points)
         for i, data in enumerate(self.image_points):
             #if data and data['points']:
                 #print(f"Camara {i+1}: {data['points']} at {data['timestamp']}")
@@ -93,10 +93,12 @@ class Cameras:
                         
         #Capturing points for camera pose and live triangulation
         if self.is_capturing_points:
-            if any(data is not None and 'points' in data and np.all(data['points'] != []) for data in self.image_points):
+            
+            #if any(np.all(image_point['points'][0] != [None, None]) for image_point in self.image_points):
+            if (any(np.all(point[0] != [None,None]) for point in self.image_points)):
                 if self.is_capturing_points and not self.is_triangulating_points:
-                    self.socketio.emit("image-points", [x['points'] for x in self.image_points if x and 'points' in x])
-
+                    #self.socketio.emit("image-points", [x['points'][0] for x in self.image_points if x and 'points' in x])
+                    self.socketio.emit("image-points", [x[0] for x in self.image_points])
 
                 elif self.is_triangulating_points:
                     errors, object_points, frames = find_point_correspondance_and_object_points(self.image_points, self.camera_poses, frames)
@@ -141,7 +143,7 @@ class Cameras:
                         "filtered_objects": filtered_objects
                     })
 
-        self.image_points = [None, None, None, None]
+        self.image_points = [None] * self.num_cameras
         self.frame_ready = False
 
         end_time = time.time()
@@ -168,20 +170,24 @@ class Cameras:
 
     def start_trangulating_points(self, camera_poses):
         self.is_capturing_points = True
+        self.mqtt_client.publish("tb-tracker/is_capturing_points", "true")
         self.is_triangulating_points = True
         self.camera_poses = camera_poses
         self.kalman_filter = KalmanFilter(self.num_objects)
 
     def stop_trangulating_points(self):
         self.is_capturing_points = False
+        self.mqtt_client.publish("tb-tracker/is_capturing_points", "false")
         self.is_triangulating_points = False
         self.camera_poses = None
 
     def start_locating_objects(self):
         self.is_locating_objects = True
+        self.mqtt_client.publish("tb-tracker/is_capturing_points", "true")
 
     def stop_locating_objects(self):
         self.is_locating_objects = False
+        self.mqtt_client.publish("tb-tracker/is_capturing_points", "false")
     
     def get_camera_params(self, camera_num):
         return {
@@ -220,32 +226,39 @@ class Cameras:
         if camera_id is not None:
             # Decodificar el mensaje y extraer los puntos
             data = json.loads(msg.payload.decode())
-            points = data.get("points", [])
+            points = data.get("points", [None, None])
             timestamp = data.get("timestamp", None)
 
             # Almacenar los puntos en la posición correspondiente del array
-            self.image_points[camera_id] = {
-                'points': points,
-                'timestamp': timestamp
-            }
+            # self.image_points[camera_id] = {
+            #     'points': points,
+            #     'timestamp': timestamp
+            # }
 
-            self.frame_ready = True
-
-            print(f"Received points from cam_{camera_id + 1}: {points}")
+            self.image_points[camera_id] = points
+            
+            if all(data is not None for data in self.image_points):
+                # if any(np.all(image_point['points'][0] != [None, None]) for image_point in self.image_points):
+                #     print(self.image_points)
+                self.frame_ready = True
+            
+            # if points[0] != [None, None]:
+            #print(f"Received points from cam_{camera_id + 1}: {points}")
         
 
-    def generate_frame_with_points(self, camera_index, data):
+    def generate_frame_with_points(self, camera_index, image_points):
         # Tamaño cuadrado original (640x640 píxeles)
         square_size = 640
         
         # Tamaño deseado (320x240 píxeles)
         output_width = 320
-        output_height = 240
+        output_height = 320
 
         # Crear una imagen negra de 320x240 píxeles
         frame = np.zeros((output_height, output_width, 3), dtype=np.uint8)
 
-        if data and data['points']:
+        # if data and data['points']:
+        if image_points != None:
             # Calcular el padding aplicado a la imagen cuadrada original (ay será 80 en este caso)
             ax = (square_size - 640) // 2  # En este caso, ax será 0
             ay = (square_size - 480) // 2  # En este caso, ay será 80
@@ -255,18 +268,19 @@ class Cameras:
             scale_y = output_height / square_size
 
             # Dibujar los puntos en la imagen escalada
-            if data["points"] != []:
-                for point in data["points"]:
-                    if len(point) == 2:
-                        # Ajustar las coordenadas del punto según el padding y escalar a la nueva resolución
-                        x = int((point[0] + ax) * scale_x)
-                        y = int((point[1] + ay) * scale_y)
-                        
-                        # Verificar que las coordenadas están dentro de los límites de la imagen de salida
-                        if 0 <= x < output_width and 0 <= y < output_height:
-                            cv.circle(frame, (x, y), 2, (0, 255, 0), -1)  # Puntos verdes
-                        else:
-                            print(f"Point {point} out of bounds after scaling for camera {camera_index + 1}")
+            #if data["points"] != []:
+            #for point in data["points"]:
+            for point in image_points:
+                if len(point) == 2 and point != [None, None]:
+                    # Ajustar las coordenadas del punto según el padding y escalar a la nueva resolución
+                    x = int((point[0] + ax) * scale_x)
+                    y = int((point[1] ) * scale_y)
+                    
+                    # Verificar que las coordenadas están dentro de los límites de la imagen de salida
+                    if 0 <= x < output_width and 0 <= y < output_height:
+                        cv.circle(frame, (x, y), 2, (0, 255, 0), -1)  # Puntos verdes
+                    else:
+                        print(f"Point {point} out of bounds after scaling for camera {camera_index + 1}")
 
         return frame
 
@@ -409,11 +423,21 @@ def triangulate_points(image_points, camera_poses):
 def find_point_correspondance_and_object_points(image_points, camera_poses, frames):
     cameras = Cameras.instance()
 
+    image_points = copy.deepcopy(image_points) # copy because image_points may be ocuppied by on_message
+
     for image_points_i in image_points:
         try:
             image_points_i.remove([None, None])
         except:
             pass
+
+
+    # for image_points_i in image_points:
+    #     try:
+    #         print(image_points_i)
+    #         image_points_i.remove([None, None])
+    #     except:
+    #         pass
 
     # [object_points, possible image_point groups, image_point from camera]
     correspondances = [[[i]] for i in image_points[0]]
@@ -431,16 +455,20 @@ def find_point_correspondance_and_object_points(image_points, camera_poses, fram
         for root_image_point in root_image_points:
             F = cv.sfm.fundamentalFromProjections(Ps[root_image_point["camera"]], Ps[i])
             line = cv.computeCorrespondEpilines(np.array([root_image_point["point"]], dtype=np.float32), 1, F)
+            scaled_line = scale_epipolar_line(line)
+
             epipolar_lines.append(line[0,0].tolist())
-            frames[i] = drawlines(frames[i], line[0])
+            frames[i] = drawlines(frames[i], scaled_line[0])
 
         not_closest_match_image_points = np.array(image_points[i])
         points = np.array(image_points[i])
 
         for j, [a, b, c] in enumerate(epipolar_lines):
             distances_to_line = np.array([])
+            print(f"Camera {i} - Line {j}: {a}x + {b}y + {c} = 0")
+            print(f"Points: {points}")
             if len(points) != 0:
-                distances_to_line = np.abs(a*points[:,0] + b*points[:,1] + c) / np.sqrt(a**2 + b**2)
+                distances_to_line = np.abs(a*points[:,0] + b*points[:,1] + c) / np.sqrt(a**2 + b**2) ## ERROR
 
             possible_matches = points[distances_to_line < 5].copy()
 
@@ -490,6 +518,17 @@ def find_point_correspondance_and_object_points(image_points, camera_poses, fram
 
     return np.array(errors), np.array(object_points), frames
 
+def scale_epipolar_line(line, scale_factor=0.5):
+    # Recuperar los coeficientes de la línea
+    a, b, c = line[0, 0, 0], line[0, 0, 1], line[0, 0, 2]
+    
+    # Escalar los coeficientes
+    a_scaled = a * scale_factor
+    b_scaled = b * scale_factor
+    c_scaled = c * scale_factor
+    
+    # Devolver la línea escalada en el mismo formato que la original
+    return np.array([[[a_scaled, b_scaled, c_scaled]]])
 
 def locate_objects(object_points, errors):
     dist1 = 0.095

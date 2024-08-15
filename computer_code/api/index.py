@@ -423,11 +423,13 @@ def calculate_camera_pose(data):
     for camera_i in range(0, cameras.num_cameras-1):
         camera1_image_points = image_points_t[camera_i]
         camera2_image_points = image_points_t[camera_i+1]
+
         not_none_indicies = np.where(np.all(camera1_image_points != None, axis=1) & np.all(camera2_image_points != None, axis=1))[0]
         camera1_image_points = np.take(camera1_image_points, not_none_indicies, axis=0).astype(np.float32)
         camera2_image_points = np.take(camera2_image_points, not_none_indicies, axis=0).astype(np.float32)
 
         F, _ = cv.findFundamentalMat(camera1_image_points, camera2_image_points, cv.FM_RANSAC, 1, 0.99999)
+
         E = cv.sfm.essentialFromFundamental(F, cameras.get_camera_params(0)["intrinsic_matrix"], cameras.get_camera_params(1)["intrinsic_matrix"])
         possible_Rs, possible_ts = cv.sfm.motionFromEssential(E)
 

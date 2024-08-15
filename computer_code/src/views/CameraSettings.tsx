@@ -101,6 +101,7 @@ const CameraSettings = (props: CameraSettingsProps) => {
   useEffect(() => {
     socket.on("image-points", (data) => {
       setCapturedPointsForPose((prev) => `${prev}${JSON.stringify(data)},`);
+      console.log(data);
     });
 
     return () => {
